@@ -1314,9 +1314,11 @@ EXPORT_SYMBOL(drm_mode_vrefresh);
  * @hdisplay: hdisplay value to fill in
  * @vdisplay: vdisplay value to fill in
  *
- * The vdisplay value will be doubled for a frame packing stereo mode, and the
- * hdisplay value for a side by side (full) stereo mode: the size of a buffer
- * holding both eyes.
+ * For a stereo mode they are the size of a buffer holding the whole 3D frame
+ * (HDMI 1.4a, section 8.2.3.2 and Appendix H): the vdisplay value grows by
+ * one vtotal for frame packing, field alternative and L + depth, by three for
+ * L + depth + graphics + graphics-depth, and doubles for line alternative; the
+ * hdisplay value doubles for side by side (full).
  */
 void drm_mode_get_hv_timing(const struct drm_display_mode *mode,
 			    int *hdisplay, int *vdisplay)
@@ -1340,9 +1342,11 @@ EXPORT_SYMBOL(drm_mode_get_hv_timing);
  *
  * - The CRTC_INTERLACE_HALVE_V flag can be used to halve vertical timings of
  *   interlaced modes.
- * - The CRTC_STEREO_DOUBLE flag can be used to compute the timings for
- *   buffers containing two eyes (only adjust the timings when needed, eg. for
- *   "frame packing" or "side by side full").
+ * - The CRTC_STEREO_DOUBLE flag can be used to compute the timings of the 3D
+ *   frame of a stereo mode, for buffers containing both eyes (and, for the
+ *   picture plus depth structures, the depth and graphics pictures): the
+ *   timings of HDMI 1.4a, section 8.2.3.2 and Appendix H, Figures H-2 to H-6.
+ *   Top and bottom and side by side (half) keep the 2D timings.
  * - The CRTC_NO_DBLSCAN and CRTC_NO_VSCAN flags request that adjustment *not*
  *   be performed for doublescan and vscan > 1 modes respectively.
  */
@@ -1394,11 +1398,47 @@ void drm_mode_set_crtcinfo(struct drm_display_mode *p, int adjust_flags)
 
 		switch (layout) {
 		case DRM_MODE_FLAG_3D_FRAME_PACKING:
+		case DRM_MODE_FLAG_3D_FIELD_ALTERNATIVE:
+		case DRM_MODE_FLAG_3D_L_DEPTH:
+			/*
+			 * Two 2D frames make one 3D frame, the second picture
+			 * starting one vtotal after the first: frame packing
+			 * (Figures 8-3 and 8-4, the vertical blanking between the
+			 * pictures sent as active space), field alternative
+			 * (Figure H-2, the right eye's fields after the left
+			 * eye's) and L + depth (Figure H-5, the depth picture
+			 * after the 2D picture). Vertical total and pixel clock
+			 * double.
+			 */
 			p->crtc_clock *= 2;
 			p->crtc_vdisplay += p->crtc_vtotal;
 			p->crtc_vsync_start += p->crtc_vtotal;
 			p->crtc_vsync_end += p->crtc_vtotal;
 			p->crtc_vtotal += p->crtc_vtotal;
+			break;
+		case DRM_MODE_FLAG_3D_L_DEPTH_GFX_GFX_DEPTH:
+			/*
+			 * Figure H-6: the 2D picture, its depth, the graphics and
+			 * their depth, one vtotal apart. Vertical total and pixel
+			 * clock grow four times.
+			 */
+			p->crtc_clock *= 4;
+			p->crtc_vdisplay += 3 * p->crtc_vtotal;
+			p->crtc_vsync_start += 3 * p->crtc_vtotal;
+			p->crtc_vsync_end += 3 * p->crtc_vtotal;
+			p->crtc_vtotal *= 4;
+			break;
+		case DRM_MODE_FLAG_3D_LINE_ALTERNATIVE:
+			/*
+			 * Figure H-3: the eyes alternate line by line, both at
+			 * full height, so every vertical value and the pixel
+			 * clock double.
+			 */
+			p->crtc_clock *= 2;
+			p->crtc_vdisplay *= 2;
+			p->crtc_vsync_start *= 2;
+			p->crtc_vsync_end *= 2;
+			p->crtc_vtotal *= 2;
 			break;
 		case DRM_MODE_FLAG_3D_SIDE_BY_SIDE_FULL:
 			/*
@@ -1429,9 +1469,11 @@ EXPORT_SYMBOL(drm_mode_set_crtcinfo);
  * @mode: mode to query
  *
  * The pixel clock in kHz of @mode as it goes out on the link, with its stereo
- * layout: doubled for frame packing, grown with the doubled active width for
- * side by side (full), unchanged for the other layouts and for 2D modes.
- * Drivers use it to check a stereo mode against their clock limits.
+ * layout: doubled for frame packing, field alternative, line alternative and
+ * L + depth, grown with the doubled active width for side by side (full), four
+ * times for L + depth + graphics +
+ * graphics-depth, unchanged for top and bottom, side by side (half) and 2D
+ * modes. Drivers use it to check a stereo mode against their clock limits.
  */
 int drm_mode_stereo_clock(const struct drm_display_mode *mode)
 {
