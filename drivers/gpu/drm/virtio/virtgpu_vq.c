@@ -724,17 +724,27 @@ void virtio_gpu_cmd_set_scanout_stereo(struct virtio_gpu_device *vgdev,
 {
 	struct virtio_gpu_set_scanout_stereo *cmd_p;
 	struct virtio_gpu_vbuffer *vbuf;
-	struct drm_rect left, right;
+	struct drm_rect left, right, graphics, graphics_depth;
 
 	/*
-	 * Where each view sits in the frame of a stereo mode, as
-	 * drm_mode_set_crtcinfo() times it (the HDMI 1.4b 3D structures).
+	 * Where each picture sits in the frame of a stereo mode, as
+	 * drm_mode_set_crtcinfo() times it (the HDMI 1.4a 3D structures).
 	 */
 	left = DRM_RECT_INIT(0, 0, mode->hdisplay, mode->vdisplay);
 	right = left;
+	graphics = DRM_RECT_INIT(0, 0, 0, 0);
+	graphics_depth = graphics;
 	switch (mode->flags & DRM_MODE_FLAG_3D_MASK) {
 	case DRM_MODE_FLAG_3D_FRAME_PACKING:
+	case DRM_MODE_FLAG_3D_L_DEPTH:
 		drm_rect_translate(&right, 0, mode->vtotal);
+		break;
+	case DRM_MODE_FLAG_3D_L_DEPTH_GFX_GFX_DEPTH:
+		drm_rect_translate(&right, 0, mode->vtotal);
+		graphics = left;
+		drm_rect_translate(&graphics, 0, 2 * mode->vtotal);
+		graphics_depth = left;
+		drm_rect_translate(&graphics_depth, 0, 3 * mode->vtotal);
 		break;
 	case DRM_MODE_FLAG_3D_SIDE_BY_SIDE_FULL:
 		drm_rect_translate(&right, mode->hdisplay, 0);
@@ -764,6 +774,8 @@ void virtio_gpu_cmd_set_scanout_stereo(struct virtio_gpu_device *vgdev,
 	cmd_p->view_height = cpu_to_le32(mode->vdisplay);
 	convert_to_hw_rect(&cmd_p->left, &left);
 	convert_to_hw_rect(&cmd_p->right, &right);
+	convert_to_hw_rect(&cmd_p->graphics, &graphics);
+	convert_to_hw_rect(&cmd_p->graphics_depth, &graphics_depth);
 
 	virtio_gpu_queue_ctrl_buffer(vgdev, vbuf);
 }
