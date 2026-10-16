@@ -416,10 +416,11 @@ nv50_outp_atomic_check_view(struct drm_encoder *encoder,
  */
 static void
 nv50_hdmi_hw_mode(const struct drm_display_mode *mode,
-		  struct drm_display_mode *hw)
+		  struct drm_display_mode *hw, u32 stereo_flags)
 {
 	*hw = *mode;
-	drm_mode_set_crtcinfo(hw, CRTC_INTERLACE_HALVE_V | CRTC_STEREO_DOUBLE);
+	drm_mode_set_crtcinfo(hw, CRTC_INTERLACE_HALVE_V | CRTC_STEREO_DOUBLE |
+			      stereo_flags);
 }
 
 /* Choose the highest depth up to bpc supported by both ends. Enable
@@ -503,7 +504,8 @@ nv50_outp_atomic_fix_depth(struct drm_encoder *encoder, struct drm_crtc_state *c
 				nouveau_connector_tmds_link_bandwidth(connector);
 			struct drm_display_mode hw;
 
-			nv50_hdmi_hw_mode(mode, &hw);
+			nv50_hdmi_hw_mode(mode, &hw,
+					  drm_atomic_crtc_stereo_flags(crtc_state));
 			while (asyh->or.bpc > 8 &&
 			       !nouveau_hdmi_tmds_possible(tmds_max, hw.crtc_clock,
 							   asyh->or.bpc))
@@ -937,7 +939,7 @@ nv50_imp_mode_valid(struct drm_connector *connector,
 
 	/* Convert the mode to the raster atomic check would program. */
 	adjusted = *mode;
-	nv50_head_mode_from_drm(&adjusted, &m);
+	nv50_head_mode_from_drm(&adjusted, &m, 0);
 
 	/* Use the first present head rather than assuming head 0 exists. */
 	probe_head = disp->disp->head_mask ? ffs(disp->disp->head_mask) - 1 : 0;
@@ -1008,6 +1010,7 @@ nv50_hdmi_enable(struct drm_encoder *encoder, struct nouveau_crtc *nv_crtc,
 	struct drm_hdmi_info *hdmi = &nv_connector->base.display_info.hdmi;
 	const struct nv50_head_atom *asyh =
 		nv50_head_atom(drm_atomic_get_new_crtc_state(state, &nv_crtc->base));
+	const struct drm_connector_state *conn_state;
 	union hdmi_infoframe infoframe = { 0 };
 	const u8 rekey = 56; /* binary driver, and tegra, constant */
 	struct drm_display_mode hw;
@@ -1020,7 +1023,8 @@ nv50_hdmi_enable(struct drm_encoder *encoder, struct nouveau_crtc *nv_crtc,
 	/* The TMDS character rate is pixel clock * bpc / 8. Use that rate
 	 * for SCDC clock-ratio/scrambling setup and the firmware clock.
 	 */
-	nv50_hdmi_hw_mode(mode, &hw);
+	conn_state = drm_atomic_get_new_connector_state(state, &nv_connector->base);
+	nv50_hdmi_hw_mode(mode, &hw, drm_connector_stereo_crtc_flags(conn_state));
 	tmds_clock = hw.crtc_clock * asyh->or.bpc / 8;
 
 	/* At 12 bpc, GCP SB1 carries CD=6 and a packing phase selected by the

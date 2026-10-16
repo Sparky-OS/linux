@@ -376,11 +376,13 @@ nv50_head_atomic_check_lut(struct nv50_head *head,
 }
 
 void
-nv50_head_mode_from_drm(struct drm_display_mode *mode, struct nv50_head_mode *m)
+nv50_head_mode_from_drm(struct drm_display_mode *mode, struct nv50_head_mode *m,
+			u32 stereo_flags)
 {
 	u32 blankus;
 
-	drm_mode_set_crtcinfo(mode, CRTC_INTERLACE_HALVE_V | CRTC_STEREO_DOUBLE);
+	drm_mode_set_crtcinfo(mode, CRTC_INTERLACE_HALVE_V | CRTC_STEREO_DOUBLE |
+			      stereo_flags);
 
 	/*
 	 * DRM modes are defined in terms of a repeating interval
@@ -423,7 +425,8 @@ nv50_head_atomic_check_mode(struct nv50_head *head, struct nv50_head_atom *asyh)
 {
 	struct drm_display_mode *mode = &asyh->state.adjusted_mode;
 
-	nv50_head_mode_from_drm(mode, &asyh->mode);
+	nv50_head_mode_from_drm(mode, &asyh->mode,
+				drm_atomic_crtc_stereo_flags(&asyh->state));
 
 	asyh->or.nhsync = !!(mode->flags & DRM_MODE_FLAG_NHSYNC);
 	asyh->or.nvsync = !!(mode->flags & DRM_MODE_FLAG_NVSYNC);

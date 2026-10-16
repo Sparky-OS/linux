@@ -1586,6 +1586,13 @@ nouveau_connector_create(struct drm_device *dev, int index)
 		|| (type == DRM_MODE_CONNECTOR_HDMIA)))
 		connector->stereo_allowed = true;
 
+	/*
+	 * The vendor InfoFrame registers take PB0 to PB6 only, so the 3D
+	 * metadata, which starts at PB6 or PB7, cannot be sent.
+	 */
+	if (connector->stereo_allowed && type == DRM_MODE_CONNECTOR_HDMIA)
+		drm_connector_attach_sbs_full_timing_property(connector);
+
 	/* defaults, will get overridden in detect() */
 	connector->interlace_allowed = false;
 	connector->doublescan_allowed = false;
