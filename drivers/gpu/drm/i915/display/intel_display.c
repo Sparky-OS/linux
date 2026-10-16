@@ -4817,7 +4817,8 @@ intel_modeset_pipe_config(struct intel_atomic_state *state,
 
 	/* Fill in default crtc timings, allow encoders to overwrite them. */
 	drm_mode_set_crtcinfo(&crtc_state->hw.adjusted_mode,
-			      CRTC_STEREO_DOUBLE);
+			      CRTC_STEREO_DOUBLE |
+			      drm_atomic_crtc_stereo_flags(&crtc_state->uapi));
 
 	/* Pass our mode to the connectors and the CRTC to give them a chance to
 	 * adjust it according to limitations or connector properties, and also

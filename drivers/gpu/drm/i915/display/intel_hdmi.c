@@ -834,6 +834,9 @@ intel_hdmi_compute_hdmi_infoframe(struct intel_encoder *encoder,
 	if (drm_WARN_ON(encoder->base.dev, ret))
 		return false;
 
+	if (drm_hdmi_vendor_infoframe_set_3d_metadata(frame, conn_state))
+		return false;
+
 	ret = hdmi_vendor_infoframe_check(frame);
 	if (drm_WARN_ON(encoder->base.dev, ret))
 		return false;
@@ -2726,6 +2729,11 @@ intel_hdmi_add_properties(struct intel_hdmi *intel_hdmi, struct drm_connector *_
 
 	if (!HAS_GMCH(display))
 		drm_connector_attach_max_bpc_property(&connector->base, 8, 12);
+
+	if (connector->base.stereo_allowed) {
+		drm_connector_attach_sbs_full_timing_property(&connector->base);
+		drm_connector_attach_hdmi_3d_metadata_property(&connector->base);
+	}
 }
 
 /*
