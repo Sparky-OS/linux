@@ -371,6 +371,25 @@ enum hdmi_3d_structure {
 };
 
 
+/*
+ * 3D_Metadata_type of the HDMI Vendor Specific InfoFrame (HDMI 1.4a,
+ * Appendix H, Table H-4). Parallax information is the one defined type: the
+ * parallax_zero, parallax_scale, dref and wref parameters of ISO/IEC 23002-3
+ * (sections 6.1.2.2 and 6.2.2.2), each 16 bits, most significant byte first.
+ */
+enum hdmi_3d_metadata_type {
+	HDMI_3D_METADATA_PARALLAX = 0,
+};
+
+#define HDMI_3D_METADATA_PARALLAX_SIZE	8
+
+/*
+ * The 3D metadata follows the OUI, PB4, PB5 and, for side by side (half),
+ * 3D_Ext_Data, after its own type and length byte, inside the largest
+ * InfoFrame body (HDMI_MAX_INFOFRAME_SIZE).
+ */
+#define HDMI_3D_METADATA_MAX_SIZE	20
+
 struct hdmi_vendor_infoframe {
 	enum hdmi_infoframe_type type;
 	unsigned char version;
@@ -379,6 +398,10 @@ struct hdmi_vendor_infoframe {
 	u8 vic;
 	enum hdmi_3d_structure s3d_struct;
 	unsigned int s3d_ext_data;
+	bool s3d_meta_present;
+	enum hdmi_3d_metadata_type s3d_meta_type;
+	u8 s3d_meta_length;
+	u8 s3d_meta[HDMI_3D_METADATA_MAX_SIZE];
 };
 
 /* HDR Metadata as per 861.G spec */

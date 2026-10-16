@@ -549,21 +549,40 @@ int hdmi_vendor_infoframe_init(struct hdmi_vendor_infoframe *frame)
 }
 EXPORT_SYMBOL(hdmi_vendor_infoframe_init);
 
+static bool hdmi_3d_ext_data_present(enum hdmi_3d_structure s3d_struct)
+{
+	/* HDMI 1.4a, 8.2.3: only 3D_Structure 1000 to 1111 carry 3D_Ext_Data */
+	return s3d_struct >= HDMI_3D_STRUCTURE_SIDE_BY_SIDE_HALF;
+}
+
 static int hdmi_vendor_infoframe_length(const struct hdmi_vendor_infoframe *frame)
 {
+	int length;
+
+	if (frame->s3d_struct == HDMI_3D_STRUCTURE_INVALID)
+		return frame->vic != 0 ? 5 : 4;
+
+	length = 5;
+	if (hdmi_3d_ext_data_present(frame->s3d_struct))
+		length++;
+
 	/*
-	 * Side by side (half) carries 3D_Ext_Data. Top and bottom has none
-	 * (HDMI 1.4a, 8.2.3), but gets a reserved zero byte after PB5, which
-	 * Table 8-11 allows (reserved bytes up to PB(Nv)): sinks that only
-	 * engage 3D on a 6-byte body exist (a Sony KDL-46HX855; JVC projectors).
+	 * HDMI 1.4a, Appendix H, Table H-1: the 3D metadata follows PB5, or
+	 * 3D_Ext_Data when there is one, with its type and length byte first.
 	 */
-	if (frame->s3d_struct >= HDMI_3D_STRUCTURE_SIDE_BY_SIDE_HALF ||
-	    frame->s3d_struct == HDMI_3D_STRUCTURE_TOP_AND_BOTTOM)
-		return 6;
-	else if (frame->vic != 0 || frame->s3d_struct != HDMI_3D_STRUCTURE_INVALID)
-		return 5;
-	else
-		return 4;
+	if (frame->s3d_meta_present)
+		return length + 1 + frame->s3d_meta_length;
+
+	/*
+	 * Top and bottom has no 3D_Ext_Data (HDMI 1.4a, 8.2.3), but gets a
+	 * reserved zero byte after PB5, which Table 8-11 allows (reserved bytes
+	 * up to PB(Nv)): sinks that only engage 3D on a 6-byte body exist (a
+	 * Sony KDL-46HX855; JVC projectors).
+	 */
+	if (frame->s3d_struct == HDMI_3D_STRUCTURE_TOP_AND_BOTTOM)
+		length++;
+
+	return length;
 }
 
 static int hdmi_vendor_infoframe_check_only(const struct hdmi_vendor_infoframe *frame)
@@ -577,7 +596,22 @@ static int hdmi_vendor_infoframe_check_only(const struct hdmi_vendor_infoframe *
 	if (frame->vic != 0 && frame->s3d_struct != HDMI_3D_STRUCTURE_INVALID)
 		return -EINVAL;
 
+	if (frame->s3d_meta_present) {
+		if (frame->s3d_struct == HDMI_3D_STRUCTURE_INVALID ||
+		    frame->s3d_meta_length > HDMI_3D_METADATA_MAX_SIZE ||
+		    frame->s3d_meta_type > 0x7)
+			return -EINVAL;
+
+		/* HDMI 1.4a, Appendix H, Table H-4 */
+		if (frame->s3d_meta_type == HDMI_3D_METADATA_PARALLAX &&
+		    frame->s3d_meta_length != HDMI_3D_METADATA_PARALLAX_SIZE)
+			return -EINVAL;
+	}
+
 	if (frame->length != hdmi_vendor_infoframe_length(frame))
+		return -EINVAL;
+
+	if (frame->length > HDMI_MAX_INFOFRAME_SIZE)
 		return -EINVAL;
 
 	return 0;
@@ -643,10 +677,21 @@ ssize_t hdmi_vendor_infoframe_pack_only(const struct hdmi_vendor_infoframe *fram
 	ptr[6] = 0x00;
 
 	if (frame->s3d_struct != HDMI_3D_STRUCTURE_INVALID) {
+		u8 *meta = &ptr[9];
+
 		ptr[7] = 0x2 << 5;	/* video format */
 		ptr[8] = (frame->s3d_struct & 0xf) << 4;
-		if (frame->s3d_struct >= HDMI_3D_STRUCTURE_SIDE_BY_SIDE_HALF)
+		if (hdmi_3d_ext_data_present(frame->s3d_struct)) {
 			ptr[9] = (frame->s3d_ext_data & 0xf) << 4;
+			meta++;
+		}
+		if (frame->s3d_meta_present) {
+			ptr[8] |= BIT(3);	/* 3D_Meta_present */
+			meta[0] = (frame->s3d_meta_type & 0x7) << 5 |
+				  (frame->s3d_meta_length & 0x1f);
+			memcpy(&meta[1], frame->s3d_meta,
+			       frame->s3d_meta_length);
+		}
 	} else if (frame->vic) {
 		ptr[7] = 0x1 << 5;	/* video format */
 		ptr[8] = frame->vic;
@@ -1492,6 +1537,23 @@ hdmi_3d_structure_get_name(enum hdmi_3d_structure s3d_struct)
 	return "Reserved";
 }
 
+static void hdmi_3d_metadata_log(const char *level, struct device *dev,
+				 const struct hdmi_vendor_infoframe *hvf)
+{
+	const u8 *m = hvf->s3d_meta;
+
+	if (hvf->s3d_meta_type == HDMI_3D_METADATA_PARALLAX &&
+	    hvf->s3d_meta_length == HDMI_3D_METADATA_PARALLAX_SIZE) {
+		hdmi_log("    3D metadata: parallax zero %u scale %u dref %u wref %u\n",
+			 m[0] << 8 | m[1], m[2] << 8 | m[3],
+			 m[4] << 8 | m[5], m[6] << 8 | m[7]);
+		return;
+	}
+
+	hdmi_log("    3D metadata: type %u, %u bytes\n",
+		 hvf->s3d_meta_type, hvf->s3d_meta_length);
+}
+
 static void
 hdmi_vendor_any_infoframe_log(const char *level,
 			      struct device *dev,
@@ -1519,6 +1581,8 @@ hdmi_vendor_any_infoframe_log(const char *level,
 		if (hvf->s3d_struct >= HDMI_3D_STRUCTURE_SIDE_BY_SIDE_HALF)
 			hdmi_log("    3D extension data: %d\n",
 					hvf->s3d_ext_data);
+		if (hvf->s3d_meta_present)
+			hdmi_3d_metadata_log(level, dev, hvf);
 	}
 }
 
@@ -1736,7 +1800,7 @@ hdmi_vendor_any_infoframe_unpack(union hdmi_vendor_any_infoframe *frame,
 
 	if (ptr[0] != HDMI_INFOFRAME_TYPE_VENDOR ||
 	    ptr[1] != 1 ||
-	    (ptr[2] != 4 && ptr[2] != 5 && ptr[2] != 6))
+	    ptr[2] < 4 || ptr[2] > HDMI_MAX_INFOFRAME_SIZE)
 		return -EINVAL;
 
 	length = ptr[2];
@@ -1768,13 +1832,31 @@ hdmi_vendor_any_infoframe_unpack(union hdmi_vendor_any_infoframe *frame,
 	hvf->length = length;
 
 	if (hdmi_video_format == 0x2) {
-		if (length != 5 && length != 6)
-			return -EINVAL;
+		u8 meta = 5;
+
 		hvf->s3d_struct = ptr[4] >> 4;
-		if (hvf->s3d_struct >= HDMI_3D_STRUCTURE_SIDE_BY_SIDE_HALF) {
-			if (length != 6)
+		hvf->s3d_meta_present = ptr[4] & BIT(3);
+		if (hdmi_3d_ext_data_present(hvf->s3d_struct)) {
+			if (length < 6)
 				return -EINVAL;
 			hvf->s3d_ext_data = ptr[5] >> 4;
+			meta++;
+		}
+		if (hvf->s3d_meta_present) {
+			if (length < meta + 1)
+				return -EINVAL;
+			hvf->s3d_meta_type = ptr[meta] >> 5;
+			hvf->s3d_meta_length = ptr[meta] & 0x1f;
+			if (hvf->s3d_meta_length > HDMI_3D_METADATA_MAX_SIZE ||
+			    length < meta + 1 + hvf->s3d_meta_length)
+				return -EINVAL;
+			memcpy(hvf->s3d_meta, &ptr[meta + 1],
+			       hvf->s3d_meta_length);
+		} else if (length != 5 && length != 6) {
+			return -EINVAL;
+		} else if (hdmi_3d_ext_data_present(hvf->s3d_struct) &&
+			   length != 6) {
+			return -EINVAL;
 		}
 	} else if (hdmi_video_format == 0x1) {
 		if (length != 5)
