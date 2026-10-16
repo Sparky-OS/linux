@@ -282,12 +282,19 @@ bool tpg_s_fourcc(struct tpg_data *tpg, u32 fourcc)
 	case V4L2_PIX_FMT_BGRA32:
 		tpg->color_enc = TGP_COLOR_ENC_RGB;
 		break;
+	case V4L2_PIX_FMT_INZI:
+		/* infrared (Y10) and depth (Z16), one plane after the other */
+		tpg->vdownsampling[1] = 1;
+		tpg->hdownsampling[1] = 1;
+		tpg->planes = 2;
+		fallthrough;
 	case V4L2_PIX_FMT_GREY:
 	case V4L2_PIX_FMT_Y10:
 	case V4L2_PIX_FMT_Y12:
 	case V4L2_PIX_FMT_Y16:
 	case V4L2_PIX_FMT_Y16_BE:
 	case V4L2_PIX_FMT_Z16:
+	case V4L2_PIX_FMT_CNF4:
 		tpg->color_enc = TGP_COLOR_ENC_LUMA;
 		break;
 	case V4L2_PIX_FMT_YUV444:
@@ -384,6 +391,11 @@ bool tpg_s_fourcc(struct tpg_data *tpg, u32 fourcc)
 	}
 
 	switch (fourcc) {
+	case V4L2_PIX_FMT_CNF4:
+		/* two pixels per byte: keep x even */
+		tpg->twopixelsize[0] = 1;
+		tpg->hmask[0] = ~1;
+		break;
 	case V4L2_PIX_FMT_GREY:
 	case V4L2_PIX_FMT_RGB332:
 		tpg->twopixelsize[0] = 2;
@@ -424,6 +436,10 @@ bool tpg_s_fourcc(struct tpg_data *tpg, u32 fourcc)
 	case V4L2_PIX_FMT_Y16_BE:
 	case V4L2_PIX_FMT_Z16:
 		tpg->twopixelsize[0] = 2 * 2;
+		break;
+	case V4L2_PIX_FMT_INZI:
+		tpg->twopixelsize[0] = 2 * 2;
+		tpg->twopixelsize[1] = 2 * 2;
 		break;
 	case V4L2_PIX_FMT_RGB24:
 	case V4L2_PIX_FMT_BGR24:
@@ -1174,6 +1190,20 @@ static void gen_twopix(struct tpg_data *tpg,
 		/* See comment for V4L2_PIX_FMT_Y16 above */
 		buf[0][offset] = r_y_h;
 		buf[0][offset+1] = r_y_h == 0xff ? r_y_h : 0;
+		break;
+	case V4L2_PIX_FMT_INZI:
+		/* infrared as V4L2_PIX_FMT_Y10, depth as V4L2_PIX_FMT_Z16 */
+		buf[0][offset] = (r_y_h << 2) & 0xff;
+		buf[0][offset+1] = r_y_h >> 6;
+		buf[1][offset] = r_y_h == 0xff ? r_y_h : 0;
+		buf[1][offset+1] = r_y_h;
+		break;
+	case V4L2_PIX_FMT_CNF4:
+		/* two pixels per byte, the first in bits 3-0 */
+		if (odd)
+			buf[0][0] |= (r_y_h >> 4) << 4;
+		else
+			buf[0][0] = r_y_h >> 4;
 		break;
 	case V4L2_PIX_FMT_YUV422M:
 	case V4L2_PIX_FMT_YUV422P:
