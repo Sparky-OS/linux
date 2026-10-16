@@ -4813,43 +4813,74 @@ static int add_hdmi_mode(struct drm_connector *connector, u8 vic)
 	return 1;
 }
 
+/*
+ * The DRM mode flag of each 3D_Structure value (HDMI 1.4a, Table H-2), and
+ * the timings each structure can be sent in: field alternative only
+ * interlaced (Figure H-2), line alternative and the two picture plus depth
+ * structures only progressive (Figures H-3, H-5 and H-6).
+ */
+static u32 hdmi_3d_structure_mode_flag(int structure,
+				       const struct drm_display_mode *mode)
+{
+	bool interlaced = mode->flags & DRM_MODE_FLAG_INTERLACE;
+
+	switch (structure) {
+	case HDMI_3D_STRUCTURE_FRAME_PACKING:
+		return DRM_MODE_FLAG_3D_FRAME_PACKING;
+	case HDMI_3D_STRUCTURE_FIELD_ALTERNATIVE:
+		return interlaced ? DRM_MODE_FLAG_3D_FIELD_ALTERNATIVE : 0;
+	case HDMI_3D_STRUCTURE_LINE_ALTERNATIVE:
+		return interlaced ? 0 : DRM_MODE_FLAG_3D_LINE_ALTERNATIVE;
+	case HDMI_3D_STRUCTURE_SIDE_BY_SIDE_FULL:
+		return DRM_MODE_FLAG_3D_SIDE_BY_SIDE_FULL;
+	case HDMI_3D_STRUCTURE_L_DEPTH:
+		return interlaced ? 0 : DRM_MODE_FLAG_3D_L_DEPTH;
+	case HDMI_3D_STRUCTURE_L_DEPTH_GFX_GFX_DEPTH:
+		return interlaced ? 0 : DRM_MODE_FLAG_3D_L_DEPTH_GFX_GFX_DEPTH;
+	case HDMI_3D_STRUCTURE_TOP_AND_BOTTOM:
+		return DRM_MODE_FLAG_3D_TOP_AND_BOTTOM;
+	case HDMI_3D_STRUCTURE_SIDE_BY_SIDE_HALF:
+		return DRM_MODE_FLAG_3D_SIDE_BY_SIDE_HALF;
+	default:
+		return 0;
+	}
+}
+
+static int add_3d_struct_mode(struct drm_connector *connector, int structure,
+			      int vic_index)
+{
+	struct drm_display_mode *newmode;
+	u32 flag;
+
+	newmode = drm_display_mode_from_vic_index(connector, vic_index);
+	if (!newmode)
+		return 0;
+
+	flag = hdmi_3d_structure_mode_flag(structure, newmode);
+	if (!flag) {
+		drm_mode_destroy(connector->dev, newmode);
+		return 0;
+	}
+
+	newmode->flags |= flag;
+	drm_mode_probed_add(connector, newmode);
+
+	return 1;
+}
+
 static int add_3d_struct_modes(struct drm_connector *connector, u16 structure,
 			       int vic_index)
 {
-	struct drm_display_mode *newmode;
-	int modes = 0;
+	int modes = 0, i;
 
-	if (structure & (1 << 0)) {
-		newmode = drm_display_mode_from_vic_index(connector, vic_index);
-		if (newmode) {
-			newmode->flags |= DRM_MODE_FLAG_3D_FRAME_PACKING;
-			drm_mode_probed_add(connector, newmode);
-			modes++;
-		}
-	}
-	if (structure & (1 << 3)) {
-		newmode = drm_display_mode_from_vic_index(connector, vic_index);
-		if (newmode) {
-			newmode->flags |= DRM_MODE_FLAG_3D_SIDE_BY_SIDE_FULL;
-			drm_mode_probed_add(connector, newmode);
-			modes++;
-		}
-	}
-	if (structure & (1 << 6)) {
-		newmode = drm_display_mode_from_vic_index(connector, vic_index);
-		if (newmode) {
-			newmode->flags |= DRM_MODE_FLAG_3D_TOP_AND_BOTTOM;
-			drm_mode_probed_add(connector, newmode);
-			modes++;
-		}
-	}
-	if (structure & (1 << 8)) {
-		newmode = drm_display_mode_from_vic_index(connector, vic_index);
-		if (newmode) {
-			newmode->flags |= DRM_MODE_FLAG_3D_SIDE_BY_SIDE_HALF;
-			drm_mode_probed_add(connector, newmode);
-			modes++;
-		}
+	/*
+	 * 3D_Structure_ALL_0 to _8 name the 3D_Structure values 0 to 8 (HDMI
+	 * 1.4a, Table H-7); _7 is reserved. _15, side by side (half) with
+	 * quincunx sub-sampling only, has no DRM mode flag of its own.
+	 */
+	for (i = 0; i <= HDMI_3D_STRUCTURE_SIDE_BY_SIDE_HALF; i++) {
+		if (structure & (1 << i))
+			modes += add_3d_struct_mode(connector, i, vic_index);
 	}
 
 	return modes;
@@ -4960,9 +4991,7 @@ do_hdmi_vsdb_modes(struct drm_connector *connector, const u8 *db, u8 len)
 	offset += multi_len;
 
 	for (i = 0; i < (hdmi_3d_len - multi_len); i++) {
-		int vic_index;
-		struct drm_display_mode *newmode = NULL;
-		unsigned int newflag = 0;
+		int vic_index, structure;
 		bool detail_present;
 
 		detail_present = ((db[8 + offset + i] & 0x0f) > 7);
@@ -4974,33 +5003,13 @@ do_hdmi_vsdb_modes(struct drm_connector *connector, const u8 *db, u8 len)
 		vic_index = db[8 + offset + i] >> 4;
 
 		/* 3D_Structure_X */
-		switch (db[8 + offset + i] & 0x0f) {
-		case 0:
-			newflag = DRM_MODE_FLAG_3D_FRAME_PACKING;
-			break;
-		case 3:
-			newflag = DRM_MODE_FLAG_3D_SIDE_BY_SIDE_FULL;
-			break;
-		case 6:
-			newflag = DRM_MODE_FLAG_3D_TOP_AND_BOTTOM;
-			break;
-		case 8:
-			/* 3D_Detail_X */
-			if ((db[9 + offset + i] >> 4) == 1)
-				newflag = DRM_MODE_FLAG_3D_SIDE_BY_SIDE_HALF;
-			break;
-		}
+		structure = db[8 + offset + i] & 0x0f;
 
-		if (newflag != 0) {
-			newmode = drm_display_mode_from_vic_index(connector,
-								  vic_index);
-
-			if (newmode) {
-				newmode->flags |= newflag;
-				drm_mode_probed_add(connector, newmode);
-				modes++;
-			}
-		}
+		/* 3D_Detail_X, horizontal sub-sampling (Table H-8) */
+		if (structure != HDMI_3D_STRUCTURE_SIDE_BY_SIDE_HALF ||
+		    (db[9 + offset + i] >> 4) == 1)
+			modes += add_3d_struct_mode(connector, structure,
+						    vic_index);
 
 		if (detail_present)
 			i++;
