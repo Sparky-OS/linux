@@ -916,6 +916,9 @@ STATIC_IFN_KUNIT void fill_stream_properties_from_drm_display_mode(
 		err = drm_hdmi_vendor_infoframe_from_display_mode(&hv_frame,
 								  (struct drm_connector *)connector,
 								  mode_in);
+		if (!err)
+			err = drm_hdmi_vendor_infoframe_set_3d_metadata(&hv_frame,
+									connector_state);
 		if (err < 0)
 			drm_warn_once(connector->dev, "Failed to setup vendor infoframe on connector %s: %zd\n",
 				      connector->name, err);
@@ -1548,13 +1551,14 @@ create_stream_for_sink(struct drm_connector *connector,
 	}
 
 	/*
-	 * DRM frame packing and side by side (full) modes describe one eye.
-	 * Userspace presents both eyes in one buffer, so DC must see the
-	 * expanded link timing too.
+	 * DRM stereo modes describe one picture. Userspace presents the whole
+	 * 3D frame in one buffer (both eyes, or picture and depth), so DC must
+	 * see the link timing of that frame too; top and bottom and side by
+	 * side (half) keep their 2D timing.
 	 */
-	if ((mode.flags & DRM_MODE_FLAG_3D_MASK) == DRM_MODE_FLAG_3D_FRAME_PACKING ||
-	    (mode.flags & DRM_MODE_FLAG_3D_MASK) == DRM_MODE_FLAG_3D_SIDE_BY_SIDE_FULL) {
-		drm_mode_set_crtcinfo(&mode, CRTC_STEREO_DOUBLE);
+	if (mode.flags & DRM_MODE_FLAG_3D_MASK) {
+		drm_mode_set_crtcinfo(&mode, CRTC_STEREO_DOUBLE |
+				      drm_connector_stereo_crtc_flags(con_state));
 		drm_dbg_kms(dev, "expanded HDMI stereo timing to %dx%d total %dx%d clock %d kHz\n",
 			    mode.crtc_hdisplay, mode.crtc_vdisplay,
 			    mode.crtc_htotal, mode.crtc_vtotal, mode.crtc_clock);
@@ -2683,6 +2687,19 @@ amdgpu_dm_connector_atomic_check(struct drm_connector *conn,
 			!new_con_state->hdr_output_metadata;
 	}
 
+	/*
+	 * The side by side (full) timing and the 3D metadata of the vendor
+	 * InfoFrame are set when the stream is created.
+	 */
+	if (old_con_state->hdmi.sbs_full_timing != new_con_state->hdmi.sbs_full_timing ||
+	    old_con_state->hdmi.s3d_metadata != new_con_state->hdmi.s3d_metadata) {
+		new_crtc_state = drm_atomic_get_crtc_state(state, crtc);
+		if (IS_ERR(new_crtc_state))
+			return PTR_ERR(new_crtc_state);
+
+		new_crtc_state->mode_changed = true;
+	}
+
 	return 0;
 }
 
@@ -3284,6 +3301,11 @@ void amdgpu_dm_connector_init_helper(struct amdgpu_display_manager *dm,
 	if (connector_type == DRM_MODE_CONNECTOR_HDMIA
 		|| (connector_type == DRM_MODE_CONNECTOR_DisplayPort && !aconnector->mst_root))
 		drm_connector_attach_broadcast_rgb_property(&aconnector->base);
+
+	if (connector_type == DRM_MODE_CONNECTOR_HDMIA) {
+		drm_connector_attach_sbs_full_timing_property(&aconnector->base);
+		drm_connector_attach_hdmi_3d_metadata_property(&aconnector->base);
+	}
 
 	drm_object_attach_property(&aconnector->base.base,
 				adev->mode_info.underscan_property,
