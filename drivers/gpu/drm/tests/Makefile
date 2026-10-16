@@ -18,6 +18,7 @@ obj-$(CONFIG_DRM_KUNIT_TEST) += \
 	drm_framebuffer_test.o \
 	drm_gem_shmem_test.o \
 	drm_hdmi_state_helper_test.o \
+	drm_hdmi_vendor_infoframe_test.o \
 	drm_managed_test.o \
 	drm_mm_test.o \
 	drm_modes_test.o \
