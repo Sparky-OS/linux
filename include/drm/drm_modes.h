@@ -185,6 +185,7 @@ enum drm_mode_status {
 #define CRTC_NO_DBLSCAN		(1 << 2) /* don't adjust doublescan */
 #define CRTC_NO_VSCAN		(1 << 3) /* don't adjust doublescan */
 #define CRTC_STEREO_DOUBLE_ONLY	(CRTC_STEREO_DOUBLE | CRTC_NO_DBLSCAN | CRTC_NO_VSCAN)
+#define CRTC_STEREO_KEEP_HBLANK	(1 << 4) /* side by side (full): keep the 2D horizontal blanking */
 
 #define DRM_MODE_FLAG_3D_MAX	DRM_MODE_FLAG_3D_SIDE_BY_SIDE_HALF
 

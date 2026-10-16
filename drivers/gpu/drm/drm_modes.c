@@ -1347,6 +1347,9 @@ EXPORT_SYMBOL(drm_mode_get_hv_timing);
  *   picture plus depth structures, the depth and graphics pictures): the
  *   timings of HDMI 1.4a, section 8.2.3.2 and Appendix H, Figures H-2 to H-6.
  *   Top and bottom and side by side (half) keep the 2D timings.
+ * - The CRTC_STEREO_KEEP_HBLANK flag, with CRTC_STEREO_DOUBLE, times side by
+ *   side (full) with the 2D horizontal blanking kept and only the active width
+ *   doubled, as NVIDIA's driver does, instead of the whole line doubled.
  * - The CRTC_NO_DBLSCAN and CRTC_NO_VSCAN flags request that adjustment *not*
  *   be performed for doublescan and vscan > 1 modes respectively.
  */
@@ -1441,18 +1444,34 @@ void drm_mode_set_crtcinfo(struct drm_display_mode *p, int adjust_flags)
 			p->crtc_vtotal *= 2;
 			break;
 		case DRM_MODE_FLAG_3D_SIDE_BY_SIDE_FULL:
+			if (adjust_flags & CRTC_STEREO_KEEP_HBLANK) {
+				u64 clock = mul_u32_u32(p->crtc_clock,
+							p->crtc_htotal + p->crtc_hdisplay);
+
+				/*
+				 * The active width doubles, the horizontal
+				 * blanking is kept, and the pixel clock grows
+				 * with the total width so the refresh rate is
+				 * unchanged.
+				 */
+				p->crtc_clock = DIV_ROUND_CLOSEST_ULL(clock, p->crtc_htotal);
+				p->crtc_hsync_start += p->crtc_hdisplay;
+				p->crtc_hsync_end += p->crtc_hdisplay;
+				p->crtc_htotal += p->crtc_hdisplay;
+				p->crtc_hdisplay += p->crtc_hdisplay;
+				break;
+			}
+
 			/*
-			 * Both eyes at full width: the active width doubles, the
-			 * horizontal blanking is kept, and the pixel clock grows
-			 * with the total width so the refresh rate is unchanged.
+			 * Figure H-4: the whole line doubles, front porch, sync
+			 * and back porch included, and so does the pixel clock
+			 * (297 MHz for VIC 16, Table H-5).
 			 */
-			p->crtc_clock = DIV_ROUND_CLOSEST_ULL(mul_u32_u32(p->crtc_clock,
-									  p->crtc_htotal + p->crtc_hdisplay),
-							      p->crtc_htotal);
-			p->crtc_hsync_start += p->crtc_hdisplay;
-			p->crtc_hsync_end += p->crtc_hdisplay;
-			p->crtc_htotal += p->crtc_hdisplay;
-			p->crtc_hdisplay += p->crtc_hdisplay;
+			p->crtc_clock *= 2;
+			p->crtc_hdisplay *= 2;
+			p->crtc_hsync_start *= 2;
+			p->crtc_hsync_end *= 2;
+			p->crtc_htotal *= 2;
 			break;
 		}
 	}
@@ -1469,11 +1488,11 @@ EXPORT_SYMBOL(drm_mode_set_crtcinfo);
  * @mode: mode to query
  *
  * The pixel clock in kHz of @mode as it goes out on the link, with its stereo
- * layout: doubled for frame packing, field alternative, line alternative and
- * L + depth, grown with the doubled active width for side by side (full), four
- * times for L + depth + graphics +
+ * layout: doubled for frame packing, field alternative, line alternative, side
+ * by side (full) and L + depth, four times for L + depth + graphics +
  * graphics-depth, unchanged for top and bottom, side by side (half) and 2D
- * modes. Drivers use it to check a stereo mode against their clock limits.
+ * modes. Drivers use it to check a stereo mode against their clock limits;
+ * side by side (full) with CRTC_STEREO_KEEP_HBLANK needs less than this.
  */
 int drm_mode_stereo_clock(const struct drm_display_mode *mode)
 {
