@@ -7767,6 +7767,44 @@ drm_hdmi_vendor_infoframe_from_display_mode(struct hdmi_vendor_infoframe *frame,
 }
 EXPORT_SYMBOL(drm_hdmi_vendor_infoframe_from_display_mode);
 
+/**
+ * drm_hdmi_vendor_infoframe_set_3d_metadata() - add the 3D metadata of a
+ * connector state to an HDMI vendor infoframe
+ * @frame: HDMI vendor infoframe, filled by
+ *	drm_hdmi_vendor_infoframe_from_display_mode()
+ * @conn_state: the connector state
+ *
+ * Copies the "HDMI 3D metadata" property of @conn_state into @frame, when
+ * @frame announces a 3D structure (HDMI 1.4a, Appendix H, Table H-1). A 2D
+ * frame, or a state without the property set, is left as it is.
+ *
+ * Return: 0 on success, -EINVAL if the metadata cannot be sent (Table H-4:
+ * parallax information is 8 bytes; the InfoFrame holds at most
+ * HDMI_3D_METADATA_MAX_SIZE).
+ */
+int
+drm_hdmi_vendor_infoframe_set_3d_metadata(struct hdmi_vendor_infoframe *frame,
+					  const struct drm_connector_state *conn_state)
+{
+	const struct drm_hdmi_3d_metadata *meta;
+
+	if (!conn_state || !conn_state->hdmi.s3d_metadata ||
+	    frame->s3d_struct == HDMI_3D_STRUCTURE_INVALID)
+		return 0;
+
+	meta = conn_state->hdmi.s3d_metadata->data;
+	if (meta->type > 0x7 || meta->length > HDMI_3D_METADATA_MAX_SIZE)
+		return -EINVAL;
+
+	frame->s3d_meta_present = true;
+	frame->s3d_meta_type = meta->type;
+	frame->s3d_meta_length = meta->length;
+	memcpy(frame->s3d_meta, meta->data, meta->length);
+
+	return hdmi_vendor_infoframe_check(frame);
+}
+EXPORT_SYMBOL(drm_hdmi_vendor_infoframe_set_3d_metadata);
+
 static void drm_parse_tiled_block(struct drm_connector *connector,
 				  const struct displayid_block *block)
 {

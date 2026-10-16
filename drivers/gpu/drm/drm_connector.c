@@ -27,6 +27,7 @@
 #include <drm/drm_encoder.h>
 #include <drm/drm_file.h>
 #include <drm/drm_managed.h>
+#include <drm/drm_modes.h>
 #include <drm/drm_panel.h>
 #include <drm/drm_print.h>
 #include <drm/drm_privacy_screen_consumer.h>
@@ -1439,6 +1440,11 @@ static const struct drm_prop_enum_list broadcast_rgb_names[] = {
 	{ DRM_HDMI_BROADCAST_RGB_LIMITED, "Limited 16:235" },
 };
 
+static const struct drm_prop_enum_list sbs_full_timing_names[] = {
+	{ DRM_HDMI_SBS_FULL_TIMING_WHOLE_LINE, "whole line doubled" },
+	{ DRM_HDMI_SBS_FULL_TIMING_KEEP_BLANKING, "blanking kept" },
+};
+
 /*
  * drm_hdmi_connector_get_broadcast_rgb_name - Return a string for HDMI connector RGB broadcast selection
  * @broadcast_rgb: Broadcast RGB selection to compute name of
@@ -1997,6 +2003,37 @@ EXPORT_SYMBOL(drm_connector_attach_dp_subconnector_property);
  *
  *      Drivers can set up this property by calling
  *      drm_connector_attach_broadcast_rgb_property().
+ *
+ * side by side full timing (HDMI specific):
+ *      How side by side (full) 3D modes are timed on the link. The picture
+ *      and the buffer are the same in both; only the horizontal blanking and
+ *      the pixel clock differ. The value can be one of the following:
+ *
+ *      whole line doubled:
+ *              The default. The horizontal total, front porch, sync and back
+ *              porch are twice the 2D format's, and so is the pixel clock
+ *              (HDMI 1.4a, Appendix H, Figure H-4; 297 MHz for 1080p60).
+ *
+ *      blanking kept:
+ *              Only the active width doubles; the 2D format's horizontal
+ *              blanking is kept, and the pixel clock grows with the total
+ *              width (278.1 MHz for 1080p60), as NVIDIA's driver times it.
+ *              For sinks that refuse the first timing.
+ *
+ * HDMI 3D metadata (HDMI specific):
+ *      A blob of &struct drm_hdmi_3d_metadata, sent as the 3D metadata of
+ *      the HDMI vendor InfoFrame (HDMI 1.4a, Appendix H, Tables H-1 and H-4)
+ *      while a 3D mode is set: for the parallax information, the
+ *      parallax_zero, parallax_scale, dref and wref parameters of ISO/IEC
+ *      23002-3 a sink needs to turn the depth of an L + depth picture into
+ *      parallax. Without a blob no metadata is sent.
+ *
+ *      Drivers set up the properties by calling
+ *      drm_connector_attach_sbs_full_timing_property() and
+ *      drm_connector_attach_hdmi_3d_metadata_property(), time stereo modes
+ *      with drm_connector_stereo_crtc_flags() or
+ *      drm_atomic_crtc_stereo_flags(), and fill the vendor InfoFrame with
+ *      drm_hdmi_vendor_infoframe_set_3d_metadata().
  *
  * content type (HDMI specific):
  *	Indicates content type setting to be used in HDMI infoframes to indicate
@@ -2941,6 +2978,89 @@ int drm_connector_attach_broadcast_rgb_property(struct drm_connector *connector)
 	return 0;
 }
 EXPORT_SYMBOL(drm_connector_attach_broadcast_rgb_property);
+
+/**
+ * drm_connector_attach_sbs_full_timing_property - attach "side by side full timing" property
+ * @connector: connector to attach the property on.
+ *
+ * For HDMI connectors that allow side by side (full) stereo modes and time
+ * them with drm_connector_stereo_crtc_flags() or drm_atomic_crtc_stereo_flags().
+ *
+ * Returns:
+ * Zero on success, negative errno on failure.
+ */
+int drm_connector_attach_sbs_full_timing_property(struct drm_connector *connector)
+{
+	struct drm_device *dev = connector->dev;
+	struct drm_property *prop;
+
+	prop = connector->sbs_full_timing_property;
+	if (!prop) {
+		prop = drm_property_create_enum(dev, DRM_MODE_PROP_ENUM,
+						"side by side full timing",
+						sbs_full_timing_names,
+						ARRAY_SIZE(sbs_full_timing_names));
+		if (!prop)
+			return -EINVAL;
+
+		connector->sbs_full_timing_property = prop;
+	}
+
+	drm_object_attach_property(&connector->base, prop,
+				   DRM_HDMI_SBS_FULL_TIMING_WHOLE_LINE);
+
+	return 0;
+}
+EXPORT_SYMBOL(drm_connector_attach_sbs_full_timing_property);
+
+/**
+ * drm_connector_attach_hdmi_3d_metadata_property - attach "HDMI 3D metadata" property
+ * @connector: connector to attach the property on.
+ *
+ * For HDMI connectors that allow stereo modes and send the whole vendor
+ * InfoFrame, with drm_hdmi_vendor_infoframe_set_3d_metadata().
+ *
+ * Returns:
+ * Zero on success, negative errno on failure.
+ */
+int drm_connector_attach_hdmi_3d_metadata_property(struct drm_connector *connector)
+{
+	struct drm_device *dev = connector->dev;
+	struct drm_property *prop;
+
+	prop = connector->hdmi_3d_metadata_property;
+	if (!prop) {
+		prop = drm_property_create(dev, DRM_MODE_PROP_BLOB,
+					   "HDMI 3D metadata", 0);
+		if (!prop)
+			return -EINVAL;
+
+		connector->hdmi_3d_metadata_property = prop;
+	}
+
+	drm_object_attach_property(&connector->base, prop, 0);
+
+	return 0;
+}
+EXPORT_SYMBOL(drm_connector_attach_hdmi_3d_metadata_property);
+
+/**
+ * drm_connector_stereo_crtc_flags - CRTC adjust flags of a connector state
+ * @state: connector state
+ *
+ * Returns the flags to pass to drm_mode_set_crtcinfo(), together with
+ * CRTC_STEREO_DOUBLE, to time stereo modes as @state asks:
+ * CRTC_STEREO_KEEP_HBLANK when side by side (full) keeps its blanking.
+ */
+u32 drm_connector_stereo_crtc_flags(const struct drm_connector_state *state)
+{
+	if (state &&
+	    state->hdmi.sbs_full_timing == DRM_HDMI_SBS_FULL_TIMING_KEEP_BLANKING)
+		return CRTC_STEREO_KEEP_HBLANK;
+
+	return 0;
+}
+EXPORT_SYMBOL(drm_connector_stereo_crtc_flags);
 
 /**
  * drm_connector_attach_colorspace_property - attach "Colorspace" property

@@ -451,6 +451,26 @@ const char *
 drm_hdmi_connector_get_broadcast_rgb_name(enum drm_hdmi_broadcast_rgb broadcast_rgb);
 
 /**
+ * enum drm_hdmi_sbs_full_timing - How an HDMI @drm_connector times side by
+ * side (full) 3D modes
+ */
+enum drm_hdmi_sbs_full_timing {
+	/**
+	 * @DRM_HDMI_SBS_FULL_TIMING_WHOLE_LINE: The whole line doubles, front
+	 * porch, sync and back porch included, and so does the pixel clock
+	 * (HDMI 1.4a, Appendix H, Figure H-4).
+	 */
+	DRM_HDMI_SBS_FULL_TIMING_WHOLE_LINE,
+
+	/**
+	 * @DRM_HDMI_SBS_FULL_TIMING_KEEP_BLANKING: Only the active width
+	 * doubles; the horizontal blanking of the 2D format is kept, and the
+	 * pixel clock grows with the total width.
+	 */
+	DRM_HDMI_SBS_FULL_TIMING_KEEP_BLANKING,
+};
+
+/**
  * struct drm_monitor_range_info - Panel's Monitor range in EDID for
  * &drm_display_info
  *
@@ -1148,6 +1168,18 @@ struct drm_connector_hdmi_state {
 	 * Broadcast RGB selection value.
 	 */
 	enum drm_hdmi_broadcast_rgb broadcast_rgb;
+
+	/**
+	 * @sbs_full_timing: Connector property to pass how side by side
+	 * (full) 3D modes are timed.
+	 */
+	enum drm_hdmi_sbs_full_timing sbs_full_timing;
+
+	/**
+	 * @s3d_metadata: Connector property to pass the 3D metadata of the
+	 * HDMI vendor InfoFrame, a &struct drm_hdmi_3d_metadata blob.
+	 */
+	struct drm_property_blob *s3d_metadata;
 
 	/**
 	 * @infoframes: HDMI Infoframes matching that state
@@ -2388,6 +2420,18 @@ struct drm_connector {
 	 */
 	struct drm_property *broadcast_rgb_property;
 
+	/**
+	 * @sbs_full_timing_property: Connector property to set how side by
+	 * side (full) 3D modes are timed.
+	 */
+	struct drm_property *sbs_full_timing_property;
+
+	/**
+	 * @hdmi_3d_metadata_property: Connector property to set the 3D
+	 * metadata of the HDMI vendor InfoFrame.
+	 */
+	struct drm_property *hdmi_3d_metadata_property;
+
 #define DRM_CONNECTOR_POLL_HPD (1 << 0)
 #define DRM_CONNECTOR_POLL_CONNECT (1 << 1)
 #define DRM_CONNECTOR_POLL_DISCONNECT (1 << 2)
@@ -2740,6 +2784,9 @@ int drm_connector_attach_vrr_capable_property(
 		struct drm_connector *connector);
 void drm_connector_attach_panel_type_property(struct drm_connector *connector);
 int drm_connector_attach_broadcast_rgb_property(struct drm_connector *connector);
+int drm_connector_attach_sbs_full_timing_property(struct drm_connector *connector);
+int drm_connector_attach_hdmi_3d_metadata_property(struct drm_connector *connector);
+u32 drm_connector_stereo_crtc_flags(const struct drm_connector_state *state);
 int drm_connector_attach_colorspace_property(struct drm_connector *connector);
 void drm_connector_attach_hdr_output_metadata_property(struct drm_connector *connector);
 bool drm_connector_atomic_hdr_metadata_equal(struct drm_connector_state *old_state,

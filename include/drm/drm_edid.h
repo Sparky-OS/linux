@@ -27,6 +27,7 @@
 
 enum hdmi_quantization_range;
 struct drm_connector;
+struct drm_connector_state;
 struct drm_device;
 struct drm_display_mode;
 struct drm_edid;
@@ -369,6 +370,9 @@ int
 drm_hdmi_vendor_infoframe_from_display_mode(struct hdmi_vendor_infoframe *frame,
 					    const struct drm_connector *connector,
 					    const struct drm_display_mode *mode);
+int
+drm_hdmi_vendor_infoframe_set_3d_metadata(struct hdmi_vendor_infoframe *frame,
+					  const struct drm_connector_state *conn_state);
 
 void
 drm_hdmi_avi_infoframe_quant_range(struct hdmi_avi_infoframe *frame,

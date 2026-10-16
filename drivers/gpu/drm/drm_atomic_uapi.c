@@ -967,6 +967,14 @@ static int drm_atomic_connector_set_property(struct drm_connector *connector,
 		state->privacy_screen_sw_state = val;
 	} else if (property == connector->broadcast_rgb_property) {
 		state->hdmi.broadcast_rgb = val;
+	} else if (property == connector->sbs_full_timing_property) {
+		state->hdmi.sbs_full_timing = val;
+	} else if (property == connector->hdmi_3d_metadata_property) {
+		return drm_property_replace_blob_from_id(dev,
+				&state->hdmi.s3d_metadata,
+				val,
+				-1, sizeof(struct drm_hdmi_3d_metadata), -1,
+				&replaced);
 	} else if (property == connector->color_format_property) {
 		state->color_format = val;
 	} else if (connector->funcs->atomic_set_property) {
@@ -1054,6 +1062,11 @@ drm_atomic_connector_get_property(struct drm_connector *connector,
 		*val = state->privacy_screen_sw_state;
 	} else if (property == connector->broadcast_rgb_property) {
 		*val = state->hdmi.broadcast_rgb;
+	} else if (property == connector->sbs_full_timing_property) {
+		*val = state->hdmi.sbs_full_timing;
+	} else if (property == connector->hdmi_3d_metadata_property) {
+		*val = state->hdmi.s3d_metadata ?
+			state->hdmi.s3d_metadata->base.id : 0;
 	} else if (property == connector->color_format_property) {
 		*val = state->color_format;
 	} else if (connector->funcs->atomic_get_property) {

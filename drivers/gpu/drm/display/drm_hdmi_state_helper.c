@@ -841,6 +841,10 @@ static int hdmi_generate_hdmi_vendor_infoframe(const struct drm_connector *conne
 	if (ret)
 		return ret;
 
+	ret = drm_hdmi_vendor_infoframe_set_3d_metadata(frame, conn_state);
+	if (ret)
+		return ret;
+
 	infoframe->set = true;
 
 	return 0;
@@ -917,6 +921,7 @@ int drm_atomic_helper_connector_hdmi_check(struct drm_connector *connector,
 		return ret;
 
 	if (old_conn_state->hdmi.broadcast_rgb != new_conn_state->hdmi.broadcast_rgb ||
+	    old_conn_state->hdmi.sbs_full_timing != new_conn_state->hdmi.sbs_full_timing ||
 	    old_conn_state->hdmi.output_bpc != new_conn_state->hdmi.output_bpc ||
 	    old_conn_state->hdmi.output_format != new_conn_state->hdmi.output_format) {
 		struct drm_crtc *crtc = new_conn_state->crtc;

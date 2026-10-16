@@ -1287,6 +1287,34 @@ EXPORT_SYMBOL(drm_atomic_get_connector_for_encoder);
 
 
 /**
+ * drm_atomic_crtc_stereo_flags - CRTC adjust flags of the connectors of a CRTC
+ * @crtc_state: new CRTC state, part of an atomic state
+ *
+ * drm_connector_stereo_crtc_flags() of the new states of the connectors
+ * that @crtc_state drives, for drivers that time the CRTC without a
+ * connector state at hand.
+ */
+u32 drm_atomic_crtc_stereo_flags(const struct drm_crtc_state *crtc_state)
+{
+	struct drm_connector_state *conn_state;
+	struct drm_connector *connector;
+	u32 flags = 0;
+	int i;
+
+	if (!crtc_state->state)
+		return 0;
+
+	for_each_new_connector_in_state(crtc_state->state, connector,
+					conn_state, i) {
+		if (conn_state->crtc == crtc_state->crtc)
+			flags |= drm_connector_stereo_crtc_flags(conn_state);
+	}
+
+	return flags;
+}
+EXPORT_SYMBOL(drm_atomic_crtc_stereo_flags);
+
+/**
  * drm_atomic_get_old_crtc_for_encoder - Get old crtc for an encoder
  * @state: Atomic state
  * @encoder: The encoder to fetch the crtc state for

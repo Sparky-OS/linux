@@ -721,6 +721,8 @@ __drm_atomic_helper_connector_duplicate_state(struct drm_connector *connector,
 
 	if (state->hdr_output_metadata)
 		drm_property_blob_get(state->hdr_output_metadata);
+	if (state->hdmi.s3d_metadata)
+		drm_property_blob_get(state->hdmi.s3d_metadata);
 
 	/* Don't copy over a writeback job, they are used only once */
 	state->writeback_job = NULL;
@@ -771,6 +773,7 @@ __drm_atomic_helper_connector_destroy_state(struct drm_connector_state *state)
 		drm_writeback_cleanup_job(state->writeback_job);
 
 	drm_property_blob_put(state->hdr_output_metadata);
+	drm_property_blob_put(state->hdmi.s3d_metadata);
 }
 EXPORT_SYMBOL(__drm_atomic_helper_connector_destroy_state);
 

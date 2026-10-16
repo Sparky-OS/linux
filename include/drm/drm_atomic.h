@@ -764,6 +764,8 @@ struct drm_connector *
 drm_atomic_get_connector_for_encoder(const struct drm_encoder *encoder,
 				     struct drm_modeset_acquire_ctx *ctx);
 
+u32 drm_atomic_crtc_stereo_flags(const struct drm_crtc_state *crtc_state);
+
 struct drm_crtc *
 drm_atomic_get_old_crtc_for_encoder(struct drm_atomic_commit *state,
 					 struct drm_encoder *encoder);

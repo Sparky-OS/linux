@@ -1008,6 +1008,25 @@ struct drm_plane_size_hint {
 };
 
 /**
+ * struct drm_hdmi_3d_metadata - 3D metadata of the HDMI vendor InfoFrame
+ * @type: 3D_Metadata_type (HDMI 1.4a, Appendix H, Table H-4); 0 is the
+ *	parallax information of ISO/IEC 23002-3 (sections 6.1.2.2 and 6.2.2.2)
+ * @length: 3D_Metadata_Length, the number of bytes of @data to send; 8 for
+ *	the parallax information
+ * @data: 3D_Metadata_1 to 3D_Metadata_N as they are sent; for the parallax
+ *	information parallax_zero, parallax_scale, dref and wref, 16 bits each,
+ *	most significant byte first
+ *
+ * The value of the "HDMI 3D metadata" connector property, a blob. The
+ * metadata is sent with a 3D mode only.
+ */
+struct drm_hdmi_3d_metadata {
+	__u8 type;
+	__u8 length;
+	__u8 data[30];
+};
+
+/**
  * struct hdr_metadata_infoframe - HDR Metadata Infoframe Data.
  *
  * HDR Metadata Infoframe as per CTA 861.G spec. This is expected
