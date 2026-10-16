@@ -198,23 +198,38 @@ void drm_hdmi_avi_infoframe_content_type(struct hdmi_avi_infoframe *frame,
 EXPORT_SYMBOL(drm_hdmi_avi_infoframe_content_type);
 
 /**
- * drm_hdmi_compute_mode_clock() - Computes the TMDS Character Rate
+ * drm_hdmi_compute_stereo_mode_clock() - Computes the TMDS Character Rate
  * @mode: Display mode to compute the clock for
  * @bpc: Bits per character
  * @fmt: Output Pixel Format used
+ * @adjust_flags: drm_mode_set_crtcinfo() flags that time a stereo mode on top
+ *	of CRTC_STEREO_DOUBLE, such as drm_connector_stereo_crtc_flags() of the
+ *	connector state
  *
- * Returns the TMDS Character Rate for a given mode, bpc count and output format.
+ * Returns the TMDS Character Rate for a given mode, bpc count and output
+ * format. A stereo mode is sent at the pixel clock of its whole 3D frame
+ * (HDMI 1.4a, section 8.2.3.2 and Appendix H), as drm_mode_set_crtcinfo()
+ * times it: twice the 2D pixel clock for frame packing, field alternative,
+ * line alternative, side by side (full) and L + depth, four times for L +
+ * depth + graphics + graphics-depth, the 2D pixel clock for top and bottom
+ * and side by side (half).
  *
  * RETURNS:
  * The TMDS Character Rate, in Hertz, or 0 on error.
  */
 unsigned long long
-drm_hdmi_compute_mode_clock(const struct drm_display_mode *mode,
-			    unsigned int bpc,
-			    enum drm_output_color_format fmt)
+drm_hdmi_compute_stereo_mode_clock(const struct drm_display_mode *mode,
+				   unsigned int bpc,
+				   enum drm_output_color_format fmt,
+				   int adjust_flags)
 {
-	unsigned long long clock = mode->clock * 1000ULL;
 	unsigned int vic = drm_match_cea_mode(mode);
+	struct drm_display_mode frame;
+	unsigned long long clock;
+
+	drm_mode_init(&frame, mode);
+	drm_mode_set_crtcinfo(&frame, CRTC_STEREO_DOUBLE_ONLY | adjust_flags);
+	clock = frame.crtc_clock * 1000ULL;
 
 	/*
 	 * CTA-861-G Spec, section 5.4 - Color Coding and Quantization
@@ -256,6 +271,29 @@ drm_hdmi_compute_mode_clock(const struct drm_display_mode *mode,
 		clock = clock * 2;
 
 	return DIV_ROUND_CLOSEST_ULL(clock * bpc, 8);
+}
+EXPORT_SYMBOL(drm_hdmi_compute_stereo_mode_clock);
+
+/**
+ * drm_hdmi_compute_mode_clock() - Computes the TMDS Character Rate
+ * @mode: Display mode to compute the clock for
+ * @bpc: Bits per character
+ * @fmt: Output Pixel Format used
+ *
+ * Returns the TMDS Character Rate for a given mode, bpc count and output
+ * format; for a stereo mode the rate of its 3D frame with the timings of HDMI
+ * 1.4a, as drm_hdmi_compute_stereo_mode_clock() gives it without adjust
+ * flags.
+ *
+ * RETURNS:
+ * The TMDS Character Rate, in Hertz, or 0 on error.
+ */
+unsigned long long
+drm_hdmi_compute_mode_clock(const struct drm_display_mode *mode,
+			    unsigned int bpc,
+			    enum drm_output_color_format fmt)
+{
+	return drm_hdmi_compute_stereo_mode_clock(mode, bpc, fmt, 0);
 }
 EXPORT_SYMBOL(drm_hdmi_compute_mode_clock);
 

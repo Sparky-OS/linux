@@ -1453,6 +1453,105 @@ retry_conn_enable:
 	drm_modeset_acquire_fini(&ctx);
 }
 
+struct drm_hdmi_stereo_rate_test {
+	const char *name;
+	u32 layout;
+	enum drm_hdmi_sbs_full_timing timing;
+	unsigned long long rate;
+};
+
+/*
+ * 1080p60 (VIC 16, 148.5 MHz) in each 3D structure, RGB 8 bpc: a stereo mode
+ * is sent at the pixel clock of its whole 3D frame (HDMI 1.4a, section
+ * 8.2.3.2 and Appendix H; 297 MHz for side by side (full), Table H-5).
+ */
+static const struct drm_hdmi_stereo_rate_test drm_hdmi_stereo_rate_tests[] = {
+	{ "2d", 0, DRM_HDMI_SBS_FULL_TIMING_WHOLE_LINE, 148500000 },
+	{ "frame-packing", DRM_MODE_FLAG_3D_FRAME_PACKING,
+	  DRM_HDMI_SBS_FULL_TIMING_WHOLE_LINE, 297000000 },
+	{ "line-alternative", DRM_MODE_FLAG_3D_LINE_ALTERNATIVE,
+	  DRM_HDMI_SBS_FULL_TIMING_WHOLE_LINE, 297000000 },
+	{ "side-by-side-full", DRM_MODE_FLAG_3D_SIDE_BY_SIDE_FULL,
+	  DRM_HDMI_SBS_FULL_TIMING_WHOLE_LINE, 297000000 },
+	{ "side-by-side-full-blanking-kept", DRM_MODE_FLAG_3D_SIDE_BY_SIDE_FULL,
+	  DRM_HDMI_SBS_FULL_TIMING_KEEP_BLANKING, 278100000 },
+	{ "l-depth", DRM_MODE_FLAG_3D_L_DEPTH,
+	  DRM_HDMI_SBS_FULL_TIMING_WHOLE_LINE, 297000000 },
+	{ "top-and-bottom", DRM_MODE_FLAG_3D_TOP_AND_BOTTOM,
+	  DRM_HDMI_SBS_FULL_TIMING_WHOLE_LINE, 148500000 },
+	{ "side-by-side-half", DRM_MODE_FLAG_3D_SIDE_BY_SIDE_HALF,
+	  DRM_HDMI_SBS_FULL_TIMING_WHOLE_LINE, 148500000 },
+};
+
+static void drm_hdmi_stereo_rate_desc(const struct drm_hdmi_stereo_rate_test *t,
+				      char *desc)
+{
+	strscpy(desc, t->name, KUNIT_PARAM_DESC_SIZE);
+}
+
+KUNIT_ARRAY_PARAM(drm_hdmi_stereo_rate, drm_hdmi_stereo_rate_tests,
+		  drm_hdmi_stereo_rate_desc);
+
+/*
+ * Test that the TMDS character rate of a stereo mode is that of its 3D
+ * frame, with the connector's side by side (full) timing.
+ */
+static void drm_test_check_tmds_char_rate_stereo(struct kunit *test)
+{
+	const struct drm_hdmi_stereo_rate_test *t = test->param_value;
+	struct drm_atomic_helper_connector_hdmi_priv *priv;
+	struct drm_modeset_acquire_ctx ctx;
+	struct drm_connector_state *conn_state;
+	struct drm_display_mode *mode;
+	struct drm_connector *conn;
+	struct drm_device *drm;
+	struct drm_crtc *crtc;
+	int ret;
+
+	priv = drm_kunit_helper_connector_hdmi_init_with_edid_funcs(test,
+				BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444),
+				8,
+				&dummy_connector_hdmi_funcs,
+				test_edid_hdmi_1080p_rgb_max_340mhz);
+	KUNIT_ASSERT_NOT_NULL(test, priv);
+
+	drm = &priv->drm;
+	crtc = priv->crtc;
+	conn = &priv->connector;
+
+	mode = drm_mode_duplicate(drm, find_preferred_mode(conn));
+	KUNIT_ASSERT_NOT_NULL(test, mode);
+	KUNIT_ASSERT_EQ(test, mode->clock, 148500);
+	mode->flags |= t->layout;
+
+	/* the commit below starts from this state */
+	conn->state->hdmi.sbs_full_timing = t->timing;
+
+	drm_modeset_acquire_init(&ctx, 0);
+
+retry_conn_enable:
+	ret = drm_kunit_helper_enable_crtc_connector(test, drm,
+						     crtc, conn,
+						     mode,
+						     &ctx);
+	if (ret == -EDEADLK) {
+		ret = drm_modeset_backoff(&ctx);
+		if (!ret)
+			goto retry_conn_enable;
+	}
+	KUNIT_ASSERT_EQ(test, ret, 0);
+
+	conn_state = conn->state;
+	KUNIT_ASSERT_NOT_NULL(test, conn_state);
+
+	KUNIT_ASSERT_EQ(test, conn_state->hdmi.output_bpc, 8);
+	KUNIT_ASSERT_EQ(test, conn_state->hdmi.output_format, DRM_OUTPUT_COLOR_FORMAT_RGB444);
+	KUNIT_EXPECT_EQ(test, conn_state->hdmi.tmds_char_rate, t->rate);
+
+	drm_modeset_drop_locks(&ctx);
+	drm_modeset_acquire_fini(&ctx);
+}
+
 /*
  * Test that when doing a commit which would use RGB 10bpc, the TMDS
  * clock rate stored in the connector state is equal to 1.25 times the
@@ -2679,6 +2778,8 @@ static struct kunit_case drm_atomic_helper_connector_hdmi_check_tests[] = {
 	KUNIT_CASE(drm_test_check_output_bpc_format_driver_8bpc_only),
 	KUNIT_CASE(drm_test_check_output_bpc_format_driver_rgb_only),
 	KUNIT_CASE(drm_test_check_tmds_char_rate_rgb_8bpc),
+	KUNIT_CASE_PARAM(drm_test_check_tmds_char_rate_stereo,
+			 drm_hdmi_stereo_rate_gen_params),
 	KUNIT_CASE(drm_test_check_tmds_char_rate_rgb_10bpc),
 	KUNIT_CASE(drm_test_check_tmds_char_rate_rgb_12bpc),
 	KUNIT_CASE_PARAM(drm_test_check_hdmi_color_format,
@@ -2968,6 +3069,41 @@ static void drm_test_check_mode_valid_reject_max_clock(struct kunit *test)
 }
 
 /*
+ * Test that drm_hdmi_connector_mode_valid() checks a stereo mode at the rate
+ * of its 3D frame: frame packing of 1080p60 is sent at 297 MHz (HDMI 1.4a,
+ * section 8.2.3.2), more than a 200 MHz sink takes, while 1080p60 itself and
+ * its top and bottom fit.
+ */
+static void drm_test_check_mode_valid_reject_stereo_clock(struct kunit *test)
+{
+	struct drm_atomic_helper_connector_hdmi_priv *priv;
+	struct drm_display_mode *mode;
+	struct drm_connector *conn;
+
+	priv = drm_kunit_helper_connector_hdmi_init_with_edid_funcs(test,
+				BIT(DRM_OUTPUT_COLOR_FORMAT_RGB444),
+				8,
+				&dummy_connector_hdmi_funcs,
+				test_edid_hdmi_1080p_rgb_max_200mhz);
+	KUNIT_ASSERT_NOT_NULL(test, priv);
+
+	conn = &priv->connector;
+	KUNIT_ASSERT_EQ(test, conn->display_info.max_tmds_clock, 200 * 1000);
+
+	mode = drm_mode_duplicate(&priv->drm, find_preferred_mode(conn));
+	KUNIT_ASSERT_NOT_NULL(test, mode);
+	KUNIT_ASSERT_EQ(test, mode->clock, 148500);
+	KUNIT_EXPECT_EQ(test, drm_hdmi_connector_mode_valid(conn, mode), MODE_OK);
+
+	mode->flags |= DRM_MODE_FLAG_3D_TOP_AND_BOTTOM;
+	KUNIT_EXPECT_EQ(test, drm_hdmi_connector_mode_valid(conn, mode), MODE_OK);
+
+	mode->flags &= ~DRM_MODE_FLAG_3D_MASK;
+	mode->flags |= DRM_MODE_FLAG_3D_FRAME_PACKING;
+	KUNIT_EXPECT_EQ(test, drm_hdmi_connector_mode_valid(conn, mode), MODE_CLOCK_HIGH);
+}
+
+/*
  * Test that drm_hdmi_connector_mode_valid() will accept modes that require a
  * 4:2:0 chroma subsampling, even if said mode would violate maximum clock
  * constraints if it used RGB 4:4:4.
@@ -3061,6 +3197,7 @@ static struct kunit_case drm_atomic_helper_connector_hdmi_mode_valid_tests[] = {
 	KUNIT_CASE(drm_test_check_mode_valid_reject),
 	KUNIT_CASE(drm_test_check_mode_valid_reject_rate),
 	KUNIT_CASE(drm_test_check_mode_valid_reject_max_clock),
+	KUNIT_CASE(drm_test_check_mode_valid_reject_stereo_clock),
 	KUNIT_CASE(drm_test_check_mode_valid_yuv420_only_max_clock),
 	KUNIT_CASE(drm_test_check_mode_valid_reject_yuv420_only_connector),
 	KUNIT_CASE(drm_test_check_mode_valid_accept_yuv420_also_connector_rgb),

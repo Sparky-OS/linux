@@ -28,6 +28,11 @@ void drm_hdmi_avi_infoframe_content_type(struct hdmi_avi_infoframe *frame,
 unsigned long long
 drm_hdmi_compute_mode_clock(const struct drm_display_mode *mode,
 			    unsigned int bpc, enum drm_output_color_format fmt);
+unsigned long long
+drm_hdmi_compute_stereo_mode_clock(const struct drm_display_mode *mode,
+				   unsigned int bpc,
+				   enum drm_output_color_format fmt,
+				   int adjust_flags);
 
 void
 drm_hdmi_acr_get_n_cts(unsigned long long tmds_char_rate,

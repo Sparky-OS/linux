@@ -582,7 +582,8 @@ hdmi_compute_clock(const struct drm_connector *connector,
 	enum drm_mode_status status;
 	unsigned long long clock;
 
-	clock = drm_hdmi_compute_mode_clock(mode, bpc, fmt);
+	clock = drm_hdmi_compute_stereo_mode_clock(mode, bpc, fmt,
+						   drm_connector_stereo_crtc_flags(conn_state));
 	if (!clock)
 		return -EINVAL;
 
